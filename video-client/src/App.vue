@@ -5,6 +5,31 @@ const socket = ref(null);
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 
+const isCameraOn = ref(true)
+const isMicOn = ref(true)
+
+const toggleCamera = () => {
+  const stream = localVideo.value.srcObject
+  if (stream) {
+    const videoTrack = stream.getVideoTracks()[0]
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled
+      isCameraOn.value = videoTrack.enabled
+    }
+  }
+}
+
+const toggleMic = () => {
+  const stream = localVideo.value.srcObject
+  if (stream) {
+    const audioTrack = stream.getAudioTracks()[0]
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled
+      isMicOn.value = audioTrack.enabled
+    }
+  }
+}
+
 let peerConnection = null;
 
 const configuration = {
@@ -54,7 +79,7 @@ onMounted(async () => {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     if (localVideo.value) {
       localVideo.value.srcObject = stream;
     }
@@ -119,7 +144,15 @@ const handleMessage = async(event) => {
     </div>
   </div>
 
-  <button @click="startCall" style="margin-top: 20px; padding: 10px 20px; font-size: 16px;">
-    📞 Call Everyone
-  </button>
+  <div class="controls" style="margin-top: 20px; display: flex; gap: 10px;">
+      <button @click="startCall" style="padding: 10px 20px; font-size: 16px;">
+        📞 Call Everyone
+      </button>
+      <button @click="toggleCamera" style="padding: 10px 20px; font-size: 16px;">
+        {{ isCameraOn ? '📷 Turn Camera Off' : '📷 Turn Camera On' }}
+      </button>
+      <button @click="toggleMic" style="padding: 10px 20px; font-size: 16px;">
+        {{ isMicOn ? '🎤 Turn Mic Off' : '🎤 Turn Mic On' }}
+      </button>
+  </div>
 </template>
