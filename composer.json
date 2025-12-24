@@ -1,0 +1,17 @@
+{
+    "name": "abhinavohri/video_call",
+    "require": {
+        "cboden/ratchet": "^0.4.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Abhinavohri\\VideoCall\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Abhinav Ohri",
+            "email": "abhinavohri13@gmail.com"
+        }
+    ]
+}
