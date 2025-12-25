@@ -1,7 +1,40 @@
 <script setup>
-import { defineEmits } from 'vue';
+import { ref, defineEmits } from 'vue';
 
 const emit = defineEmits(['create-room']);
+const roomIdInput = ref('');
+const isJoining = ref(false);
+
+const joinRoom = async () => {
+  if (!roomIdInput.value) {
+    alert('Please enter a Room ID');
+    return;
+  }
+
+  isJoining.value = true;
+  try {
+    const response = await fetch('http://localhost:8000/api/check-room.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ roomId: roomIdInput.value }),
+    });
+
+    const data = await response.json();
+
+    if (data.valid) {
+      emit('create-room', roomIdInput.value);
+    } else {
+      alert(data.error || 'Invalid Room ID or Room Expired');
+    }
+  } catch (error) {
+    console.error('Error joining room:', error);
+    alert('Failed to connect to server');
+  } finally {
+    isJoining.value = false;
+  }
+};
 </script>
 
 <template>
@@ -14,9 +47,30 @@ const emit = defineEmits(['create-room']);
       <div class="hero-content">
         <h1>Seamless Video Calls<br>for Everyone.</h1>
         <p>No downloads. No signups. Just clear communication.</p>
-        <button @click="emit('create-room')" class="cta-button">
-          Create Room
-        </button>
+        
+        <div class="actions">
+          <button @click="emit('create-room')" class="cta-button">
+            Create Room
+          </button>
+          
+          <div class="divider">
+            <span>OR</span>
+          </div>
+
+          <div class="join-form">
+            <input 
+              v-model="roomIdInput" 
+              type="text" 
+              placeholder="Enter Room ID" 
+              class="room-input"
+              @keyup.enter="joinRoom"
+            />
+            <button @click="joinRoom" class="secondary-button" :disabled="isJoining">
+              {{ isJoining ? 'Joining...' : 'Join' }}
+            </button>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -112,6 +166,13 @@ p {
   margin-right: auto;
 }
 
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
 .cta-button {
   background: #FF5500;
   color: white;
@@ -129,6 +190,74 @@ p {
   transform: translateY(-2px);
   box-shadow: 0 0 40px rgba(255, 85, 0, 0.6);
   background: #FF6600;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  color: #555;
+  font-size: 0.9rem;
+  font-weight: 600;
+  width: 100%;
+  max-width: 300px;
+  margin: 10px 0;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #333;
+}
+
+.divider span {
+  padding: 0 10px;
+}
+
+.join-form {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 400px;
+  justify-content: center;
+}
+
+.room-input {
+  background: #111;
+  border: 1px solid #333;
+  color: white;
+  padding: 12px 20px;
+  border-radius: 50px;
+  font-size: 1rem;
+  flex: 1;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.room-input:focus {
+  border-color: #FF5500;
+}
+
+.secondary-button {
+  background: transparent;
+  color: white;
+  border: 1px solid #555;
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: white;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .features {
@@ -203,6 +332,14 @@ p {
     
     .feature-card {
         padding: 30px;
+    }
+    
+    .join-form {
+      flex-direction: column;
+    }
+    
+    .room-input, .secondary-button {
+      width: 100%;
     }
 }
 </style>

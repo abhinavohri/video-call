@@ -25,8 +25,22 @@ class VideoChat implements MessageComponentInterface{
             if (!isset($this->rooms[$roomId])) {
                 $this->rooms[$roomId] = new SplObjectStorage();
             }
+            
+            foreach ($this->rooms[$roomId] as $client) {
+                $client->send(json_encode([
+                    'type' => 'user-connected',
+                    'userId' => $conn->resourceId
+                ]));
+            }
+
             $this->rooms[$roomId]->attach($conn);
             echo "New connection {$conn->resourceId} joined room {$roomId}\n";
+
+            $conn->send(json_encode([
+                'type' => 'me',
+                'id' => $conn->resourceId
+            ]));
+
         } else {
             echo "Connection {$conn->resourceId} rejected: Invalid or missing room ID '{$roomId}'.\n";
             $conn->close();
@@ -35,9 +49,16 @@ class VideoChat implements MessageComponentInterface{
 
     public function onMessage(ConnectionInterface $from, $msg) {
         if (isset($from->roomId) && isset($this->rooms[$from->roomId])) {
+            $data = json_decode($msg);
+            $payload = json_encode([
+                'type' => 'signal',
+                'sender' => $from->resourceId,
+                'data' => $data
+            ]);
+            
             foreach ($this->rooms[$from->roomId] as $client) {
                 if ($from !== $client) {
-                    $client->send($msg);
+                    $client->send($payload);
                 }
             }
         }
@@ -46,7 +67,15 @@ class VideoChat implements MessageComponentInterface{
     public function onClose(ConnectionInterface $conn) {
         if (isset($conn->roomId) && isset($this->rooms[$conn->roomId])) {
             $this->rooms[$conn->roomId]->detach($conn);
-            if (count($this->rooms[$conn->roomId]) === 0) {
+            
+            if (count($this->rooms[$conn->roomId]) > 0) {
+                 foreach ($this->rooms[$conn->roomId] as $client) {
+                    $client->send(json_encode([
+                        'type' => 'user-disconnected',
+                        'userId' => $conn->resourceId
+                    ]));
+                }
+            } else {
                 unset($this->rooms[$conn->roomId]);
                 echo "Room {$conn->roomId} is now empty and removed from memory.\n";
             }

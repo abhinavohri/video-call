@@ -11,12 +11,15 @@ const props = defineProps({
 const emit = defineEmits(['leave-room']);
 
 const socket = ref(null);
+const myId = ref(null);
 const localVideo = ref(null)
-const remoteVideo = ref(null)
 const audioCanvas = ref(null)
 
 const isCameraOn = ref(true)
 const isMicOn = ref(true)
+
+const peers = {};
+const remoteStreams = ref({});
 
 // Audio Visualizer Variables
 let audioContext = null;
@@ -48,13 +51,12 @@ const toggleMic = () => {
 }
 
 const leaveRoom = () => {
+  Object.values(peers).forEach(pc => pc.close());
+  for (const key in peers) delete peers[key];
+  remoteStreams.value = {};
+
   if (socket.value) {
     socket.value.close();
-  }
-
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
   }
 
   if (localVideo.value && localVideo.value.srcObject) {
@@ -68,11 +70,18 @@ const leaveRoom = () => {
 const setupAudioVisualizer = (stream) => {
   if (!audioCanvas.value) return;
 
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  if (audioSource) {
+      audioSource.disconnect();
+  }
+
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 32;
   
-  const bufferLength = analyser.frequencyBinCount; // 16 with fftSize 32
+  const bufferLength = analyser.frequencyBinCount; 
   dataArray = new Uint8Array(bufferLength);
 
   audioSource = audioContext.createMediaStreamSource(stream);
@@ -120,33 +129,44 @@ const drawVisualizer = () => {
   }
 };
 
-let peerConnection = null;
-
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' }
     ]
 }
 
-const createPeerConnection = () => {
-  peerConnection = new RTCPeerConnection(configuration);
+const createPeerConnection = (targetUserId, initiator) => {
+    if (peers[targetUserId]) return peers[targetUserId];
 
-  peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-          socket.value.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
-      }
-  };
+    const pc = new RTCPeerConnection(configuration);
+    peers[targetUserId] = pc;
 
-  peerConnection.ontrack = (event) => {
-      if (remoteVideo.value) {
-          remoteVideo.value.srcObject = event.streams[0];
-      }
-  };
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            sendMessage({
+                target: targetUserId,
+                type: 'ice-candidate',
+                candidate: event.candidate
+            });
+        }
+    };
 
-  const stream = localVideo.value.srcObject
-  stream.getTracks().forEach(track => {
-      peerConnection.addTrack(track, stream)
-  })
+    pc.ontrack = (event) => {
+        console.log(`Received track from ${targetUserId}`, event.streams[0]);
+        remoteStreams.value = {
+            ...remoteStreams.value,
+            [targetUserId]: event.streams[0]
+        };
+    };
+
+    const stream = localVideo.value.srcObject;
+    if (stream) {
+        stream.getTracks().forEach(track => {
+            pc.addTrack(track, stream);
+        });
+    }
+
+    return pc;
 }
 
 const connectWebSocket = (currentRoomId) => {
@@ -154,11 +174,10 @@ const connectWebSocket = (currentRoomId) => {
 
     socket.value.onopen = () => {
         console.log(`WebSocket connection established for room: ${currentRoomId}`);
-        socket.value.send(JSON.stringify({ type: 'join-room', roomId: currentRoomId }));
     };
 
     socket.value.onmessage = (event) => {
-        handleMessage(event)
+        handleMessage(event);
     };
 
     socket.value.onerror = (error)=> {
@@ -171,41 +190,74 @@ const connectWebSocket = (currentRoomId) => {
 }
 
 const sendMessage = (message) => {
-  socket.value.send(JSON.stringify(message))
+  if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify(message));
+  }
 }
 
-const startCall = async () => {
-  createPeerConnection()
-  
-  const offer = await peerConnection.createOffer()
-  await peerConnection.setLocalDescription(offer)
-  
-  sendMessage({
-    type: 'offer',
-    offer: offer
-  })
-}
+const handleMessage = async (event) => {
+    const message = JSON.parse(event.data);
 
-const handleMessage = async(event) => {
-  const message = JSON.parse(event.data)
+    if (message.type === 'me') {
+        myId.value = message.id;
+        console.log('My ID:', myId.value);
+    } else if (message.type === 'user-connected') {
+        const userId = message.userId;
+        console.log('User connected:', userId);
+        
+        const pc = createPeerConnection(userId, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        sendMessage({
+            target: userId,
+            type: 'offer',
+            offer: offer
+        });
 
-  console.log("Handling message: ", message)
-  if (message.type === 'offer') {
-    await createPeerConnection()
+    } else if (message.type === 'user-disconnected') {
+        const userId = message.userId;
+        console.log('User disconnected:', userId);
+        if (peers[userId]) {
+            peers[userId].close();
+            delete peers[userId];
+        }
+        const newStreams = { ...remoteStreams.value };
+        delete newStreams[userId];
+        remoteStreams.value = newStreams;
 
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer))
+    } else if (message.type === 'signal') {
+        const senderId = message.sender;
+        const data = message.data;
 
-    const answer = await peerConnection.createAnswer()
-    await peerConnection.setLocalDescription(answer)
-    sendMessage({
-      type: 'answer',
-      answer: answer
-    })
-  } else if (message.type === 'answer') {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer))
-  } else if (message.type === 'ice-candidate') {
-        if (peerConnection) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate))
+        if (data.target && data.target !== myId.value) {
+            return;
+        }
+
+        if (data.type === 'offer') {
+            const pc = createPeerConnection(senderId, false);
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+            
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            
+            sendMessage({
+                target: senderId,
+                type: 'answer',
+                answer: answer
+            });
+
+        } else if (data.type === 'answer') {
+            const pc = peers[senderId];
+            if (pc) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+
+        } else if (data.type === 'ice-candidate') {
+            const pc = peers[senderId];
+            if (pc) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
         }
     }
 }
@@ -218,7 +270,8 @@ onMounted(async () => {
       setupAudioVisualizer(stream);
     }
   } catch (error){
-    console.error('Error getting user media', error)
+    console.error('Error getting user media', error);
+    alert("Could not access camera/microphone.");
   }
 
   if (props.roomId) {
@@ -229,6 +282,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (animationId) cancelAnimationFrame(animationId);
   if (audioContext) audioContext.close();
+  leaveRoom();
 });
 </script>
 
@@ -240,7 +294,7 @@ onUnmounted(() => {
       <div class="spacer"></div>
     </div>
 
-    <div class="video-grid">
+    <div class="video-grid" :class="{'one-user': Object.keys(remoteStreams).length === 0, 'two-users': Object.keys(remoteStreams).length === 1}">
         <div class="video-wrapper">
             <h3>You</h3>
             <div class="video-container">
@@ -248,26 +302,24 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <div class="video-wrapper">
-            <h3>Remote</h3>
+        <div v-for="(stream, userId) in remoteStreams" :key="userId" class="video-wrapper">
+            <h3>User {{ userId.substr(0, 4) }}</h3>
             <div class="video-container">
-                <video ref="remoteVideo" autoplay playsinline class="remote-video"></video>
+                <video :srcObject="stream" autoplay playsinline class="remote-video"></video>
             </div>
         </div>
     </div>
 
     <div class="controls">
-        <button @click="startCall">
-            📞 Start Call
-        </button>
-        <button @click="toggleCamera">
-            {{ isCameraOn ? '📷 Turn Camera Off' : '📷 Turn Camera On' }}
-        </button>
-
-        <button @click="toggleMic" :class="{'mic-toggle-on': isMicOn, 'mic-toggle-off': !isMicOn}" class="mic-button-with-viz">
-            <span class="mic-label">{{ isMicOn ? '🎤 Mic On' : '🎤 Mic Off' }}</span>
-            <canvas ref="audioCanvas" width="40" height="20" class="mic-visualizer-inline"></canvas>
-        </button>
+        <div class="control-group">
+             <button @click="toggleCamera" :class="{'btn-off': !isCameraOn}">
+                {{ isCameraOn ? '📷 Camera On' : '📷 Camera Off' }}
+            </button>
+            <button @click="toggleMic" :class="{'mic-toggle-on': isMicOn, 'mic-toggle-off': !isMicOn}" class="mic-button-with-viz">
+                <span class="mic-label">{{ isMicOn ? '🎤 Mic On' : '🎤 Mic Off' }}</span>
+                <canvas ref="audioCanvas" width="40" height="20" class="mic-visualizer-inline"></canvas>
+            </button>
+        </div>
     </div>
   </div>
 </template>
@@ -290,12 +342,15 @@ onUnmounted(() => {
     padding: 1rem 2rem;
     background: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(10px);
+    z-index: 100;
 }
 
 .room-header h2 {
     margin: 0;
     flex: 1;
     text-align: center;
+    font-size: 1.2rem;
+    color: #ccc;
 }
 
 .spacer {
@@ -320,23 +375,35 @@ onUnmounted(() => {
 
 .video-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-    gap: 10px;
+    gap: 20px;
     width: 100%;
     flex: 1;
-    padding: 10px;
+    padding: 20px;
     align-content: center;
-}
-
-.video-grid:has(.video-wrapper:only-child) {
-    grid-template-columns: 1fr;
-    max-width: 1200px;
+    max-width: 1600px;
     margin: 0 auto;
 }
 
-/* When there are 2 videos, split 50/50 */
-.video-grid:has(.video-wrapper:nth-child(2):last-child) {
+/* Default: Grid for 3+ users */
+.video-grid {
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+}
+
+/* 1 User (Just me) - Full Screenish */
+.video-grid.one-user {
+    grid-template-columns: 1fr;
+    max-width: 1000px;
+}
+
+/* 2 Users - Split Screen */
+.video-grid.two-users {
     grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 768px) {
+    .video-grid.two-users {
+        grid-template-columns: 1fr;
+    }
 }
 
 .video-wrapper {
@@ -344,49 +411,42 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: center;
     position: relative;
+    width: 100%;
+    height: 100%;
+    justify-content: center;
 }
 
 .video-wrapper h3 {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(0, 0, 0, 0.7);
+    top: 15px;
+    left: 15px;
+    background: rgba(0, 0, 0, 0.6);
     padding: 5px 12px;
     border-radius: 6px;
     font-size: 14px;
     z-index: 10;
     margin: 0;
+    backdrop-filter: blur(4px);
 }
 
 .video-container {
     position: relative;
     width: 100%;
-    padding-bottom: 56.25%;
-    background: #000;
-    border-radius: 12px;
+    aspect-ratio: 16/9;
+    background: #111;
+    border-radius: 16px;
     overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
 .local-video, .remote-video {
-    position: absolute;
-    top: 0;
-    left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
 
 .local-video {
-    border: 3px solid #FF5500;
     transform: scaleX(-1);
-    border-radius: 12px;
-    background: #111;
-}
-
-.remote-video {
-    border: 3px solid #666;
-    border-radius: 12px;
-    background: #111;
 }
 
 .controls {
@@ -395,95 +455,72 @@ onUnmounted(() => {
     padding: 20px;
     background: rgba(0, 0, 0, 0.8);
     backdrop-filter: blur(10px);
-    border-top: 1px solid rgba(255, 85, 0, 0.2);
     width: 100%;
     justify-content: center;
-    flex-wrap: wrap;
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .video-grid {
-        grid-template-columns: 1fr !important;
-        gap: 10px;
-    }
-
-    .controls {
-        gap: 10px;
-        padding: 15px 10px;
-    }
-
-    button {
-        padding: 8px 12px;
-        font-size: 14px;
-    }
-
-    .room-header {
-        padding: 0.75rem 1rem;
-    }
-
-    .back-button {
-        padding: 6px 12px;
-        font-size: 13px;
-    }
+.control-group {
+    display: flex;
+    gap: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 10px;
+    border-radius: 50px;
 }
 
-/* Base button styles */
 button {
-    padding: 10px 20px;
+    padding: 12px 24px;
     font-size: 16px;
     color: white;
-    border-radius: 8px;
+    border-radius: 50px;
     cursor: pointer;
-    transition: background-color 0.3s, border-color 0.3s, color 0.3s;
-    background-color: #FF5500;
-    border: none;
+    transition: all 0.3s;
+    background-color: #333;
+    border: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 button:hover {
-    background-color: #FF7700;
+    background-color: #444;
+}
+
+.btn-off {
+    background-color: #cc0000 !important;
+    border-color: #ff0000 !important;
 }
 
 .mic-button-with-viz {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-}
-
-.mic-label {
-    white-space: nowrap;
+    gap: 12px;
+    padding: 8px 20px;
+    min-width: 140px;
 }
 
 .mic-toggle-on {
-    background-color: #000;
-    border: 2px solid #FF5500;
+    background-color: #333;
+    border: 1px solid #FF5500;
     color: #FF5500;
 }
 
 .mic-toggle-on:hover {
-    background-color: #1a0a00;
-    border-color: #FF7700;
-    color: #FF7700;
+    background-color: #2a1a10;
 }
 
 .mic-toggle-off {
-    background-color: #000;
-    border: 2px solid #888;
-    color: #888;
-}
-
-.mic-toggle-off:hover {
-    background-color: #0a0a0a;
-    border-color: #aaa;
-    color: #aaa;
+    background-color: #cc0000;
+    border: 1px solid #ff0000;
+    color: white;
 }
 
 .mic-visualizer-inline {
     width: 40px;
     height: 20px;
-    background: rgba(0, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.5);
     border-radius: 4px;
-    border: 1px solid rgba(255, 85, 0, 0.2);
 }
 </style>

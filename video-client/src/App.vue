@@ -5,17 +5,21 @@ import VideoRoom from './components/VideoRoom.vue';
 
 const roomId = ref(null);
 
-const createRoom = async () => {
+const createRoom = async (existingRoomId = null) => {
   try {
-    const response = await fetch('http://localhost:8000/api/create-room.php');
-    const data = await response.json();
-    roomId.value = data.roomId;
+    if (existingRoomId && typeof existingRoomId === 'string') {
+      roomId.value = existingRoomId;
+    } else {
+      const response = await fetch('http://localhost:8000/api/create-room.php');
+      const data = await response.json();
+      roomId.value = data.roomId;
+    }
 
-    const newUrl = `${window.location.pathname}?room=${data.roomId}`;
-    window.history.pushState({ roomId: data.roomId }, '', newUrl);
+    const newUrl = `${window.location.pathname}?room=${roomId.value}`;
+    window.history.pushState({ roomId: roomId.value }, '', newUrl);
   } catch (error) {
-    console.error('Error creating room:', error);
-    alert("Failed to create room. Is the backend server running?");
+    console.error('Error creating/joining room:', error);
+    alert("Failed to create or join room. Is the backend server running?");
   }
 };
 
