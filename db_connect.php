@@ -1,5 +1,5 @@
 <?php
-require 'vendor/autoload.php';
+require __DIR__ . '/vendor/autoload.php';
 
 if (file_exists(__DIR__ . '/.env')) {
     $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
@@ -28,7 +28,7 @@ function getDatabaseConnection() {
     if ($conn->connect_error) {
         http_response_code(500);
         header('Content-Type: application/json');
-        echo json_encode(['error' => 'Database connection failed: ' . $conn->connect_error]);
+        echo json_encode(['error' => 'Database connection failed: ' . $conn->connect_error . " (Host: $servername)"]);
         exit;
     }
 
