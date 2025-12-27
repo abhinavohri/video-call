@@ -6,29 +6,13 @@ if (file_exists(__DIR__ . '/.env')) {
 }
 
 function getDatabaseConnection() {
-    if (isset($_ENV['DATABASE_URL']) && !empty($_ENV['DATABASE_URL'])) {
-        $db_url = parse_url($_ENV['DATABASE_URL']);
+    $servername = $_ENV['DB_HOST'] ?? 'localhost';
+    $username = $_ENV['DB_USER'] ?? 'root';
+    $password = $_ENV['DB_PASSWORD'] ?? '';
+    $dbname = $_ENV['DB_NAME'] ?? 'video_call';
+    $port = $_ENV['DB_PORT'] ?? 3306;
 
-        $servername = $db_url['host'] ?? null;
-        $username = $db_url['user'] ?? null;
-        $password = $db_url['pass'] ?? null;
-        $dbname = ltrim($db_url['path'] ?? '', '/');
-        $port = $db_url['port'] ?? 3306;
-
-        error_log("Connecting to: $servername:$port as $username (db: $dbname)");
-
-        if (!$servername) {
-            throw new Exception("DATABASE_URL host is missing");
-        }
-    } else {
-        $servername = $_ENV['DB_HOST'] ?? 'localhost';
-        $username = $_ENV['DB_USERNAME'] ?? 'root';
-        $password = $_ENV['DB_PASSWORD'] ?? '';
-        $dbname = $_ENV['DB_NAME'] ?? 'video_call';
-        $port = 3306;
-
-        error_log("Using individual env vars: $servername:$port");
-    }
+    error_log("DB Connection - Host: $servername | Port: $port | User: $username | Database: $dbname");
 
     try {
         $conn = new mysqli($servername, $username, $password, $dbname, $port);
