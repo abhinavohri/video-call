@@ -10,7 +10,12 @@ const createRoom = async (existingRoomId = null) => {
     if (existingRoomId && typeof existingRoomId === 'string') {
       roomId.value = existingRoomId;
     } else {
-      const response = await fetch('http://localhost:8000/api/create-room.php');
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (!apiUrl) {
+        console.error('VITE_API_URL is not defined');
+        return;
+      }
+      const response = await fetch(`${apiUrl}/create-room.php`);
       const data = await response.json();
       roomId.value = data.roomId;
     }

@@ -13,7 +13,13 @@ const joinRoom = async () => {
 
   isJoining.value = true;
   try {
-    const response = await fetch('http://localhost:8000/api/check-room.php', {
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (!apiUrl) {
+      console.error("VITE_API_URL is not defined");
+      return;
+    }
+
+    const response = await fetch(`${apiUrl}/check-room.php`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

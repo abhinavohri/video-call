@@ -170,7 +170,12 @@ const createPeerConnection = (targetUserId, initiator) => {
 }
 
 const connectWebSocket = (currentRoomId) => {
-    socket.value = new WebSocket(`ws://localhost:8080?room=${currentRoomId}`);
+    const wsUrl = import.meta.env.VITE_WS_URL;
+    if (!wsUrl) {
+        console.error('WebSocket URL is missing. Please set VITE_WS_URL.');
+        return;
+    }
+    socket.value = new WebSocket(`${wsUrl}?room=${currentRoomId}`);
 
     socket.value.onopen = () => {
         console.log(`WebSocket connection established for room: ${currentRoomId}`);
