@@ -6,12 +6,13 @@ if (file_exists(__DIR__ . '/.env')) {
 }
 
 function getDatabaseConnection() {
-    $servername = $_ENV['DB_HOST'] ?? 'localhost';
-    $username = $_ENV['DB_USER'] ?? 'root';
-    $password = $_ENV['DB_PASSWORD'] ?? '';
-    $dbname = $_ENV['DB_NAME'] ?? 'video_call';
-    $port = $_ENV['DB_PORT'] ?? 3306;
+    $servername = getenv('DB_HOST') ?: 'localhost';
+    $username = getenv('DB_USER') ?: 'root';
+    $password = getenv('DB_PASSWORD') ?: '';
+    $dbname = getenv('DB_NAME') ?: 'railway';
+    $port = getenv('DB_PORT') ?: 3306;
 
+    error_log("DB_HOST env var: " . (getenv('DB_HOST') ? 'SET' : 'NOT SET'));
     error_log("DB Connection - Host: $servername | Port: $port | User: $username | Database: $dbname");
 
     try {
